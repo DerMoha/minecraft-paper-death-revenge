@@ -21,6 +21,10 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
+import org.bukkit.Particle;
 
 import java.util.*;
 
@@ -300,12 +304,24 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
             return;
         }
 
+        // Don't give revenge if the player was killed by someone who was their revenge target
+        if (killer != null && revengeTasks.containsKey(victim.getUniqueId())) {
+            RevengeTask task = revengeTasks.get(victim.getUniqueId());
+            if (killer.getUniqueId().equals(task.getTargetUUID())) {
+                victim.playSound(victim.getLocation(), Sound.ENTITY_VILLAGER_NO, SoundCategory.PLAYERS, 1.0f, 1.0f);
+                victim.sendMessage("§cYou were killed by your revenge target. No revenge for you!");
+                return;
+            }
+        }
+
         // Store death location
         deathLocations.put(victim.getUniqueId(), victim.getLocation());
 
-        // Find a random player that isn't the victim
+        // Find a random player that isn't the victim and isn't in revenge mode
         List<Player> possibleTargets = new ArrayList<>(Bukkit.getOnlinePlayers());
         possibleTargets.remove(victim);
+        possibleTargets.removeIf(p -> revengeTasks.containsKey(p.getUniqueId()));
+        
         if (possibleTargets.isEmpty()) {
             // Play fail sound
             victim.playSound(victim.getLocation(), Sound.ENTITY_ENDER_DRAGON_DEATH, SoundCategory.PLAYERS, 1.0f, 1.0f);
@@ -371,6 +387,23 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
                         // Now teleport and give items
                         player.teleport(target.getLocation());
                         
+                        // Spawn teleport particles
+                        spawnTeleportParticles(player, 50);
+                        
+                        // Apply blindness and slowness effects
+                        player.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, 60, 1, false, false)); // 3 seconds
+                        player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 60, 1, false, false)); // 3 seconds
+                        
+                        // Notify the hunter
+                        player.sendTitle("§c§lBLINDED!", "§eYou have 3 seconds to recover!", 0, 60, 20);
+                        
+                        // Notify the target with particles
+                        target.sendMessage("§cA revenge seeker has appeared nearby!");
+                        target.playSound(target.getLocation(), Sound.ENTITY_WITHER_SPAWN, SoundCategory.PLAYERS, 1.0f, 1.0f);
+                        spawnWarningParticles(target, 30);
+                        
+                        target.playSound(target.getLocation(), Sound.ENTITY_WITHER_SPAWN, SoundCategory.PLAYERS, 1.0f, 1.0f);
+                        
                         // Give the revenge items
                         List<ItemStack> items = new ArrayList<>();
                         
@@ -434,6 +467,39 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
     }
 
     @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        Player player = event.getPlayer();
+        
+        // If player was a revenge target, find new targets for their hunters
+        for (Map.Entry<UUID, RevengeTask> entry : new HashMap<>(revengeTasks).entrySet()) {
+            RevengeTask task = entry.getValue();
+            if (task.getTargetUUID().equals(player.getUniqueId())) {
+                // The target logged out, cancel the revenge
+                Player hunter = Bukkit.getPlayer(entry.getKey());
+                if (hunter != null) {
+                    hunter.sendMessage("§cYour revenge target logged out. Revenge cancelled.");
+                    hunter.playSound(hunter.getLocation(), Sound.ENTITY_VILLAGER_NO, SoundCategory.PLAYERS, 1.0f, 1.0f);
+                }
+                task.cancel();
+                revengeTasks.remove(entry.getKey());
+                revengeBossBars.remove(entry.getKey());
+                deathLocations.remove(entry.getKey());
+                removeRevengeItems(hunter);
+            }
+        }
+        
+        // If player was in revenge mode, cancel their revenge
+        if (revengeTasks.containsKey(player.getUniqueId())) {
+            RevengeTask task = revengeTasks.get(player.getUniqueId());
+            task.cancel();
+            revengeTasks.remove(player.getUniqueId());
+            revengeBossBars.remove(player.getUniqueId());
+            deathLocations.remove(player.getUniqueId());
+            removeRevengeItems(player);
+        }
+    }
+
+    @EventHandler
     public void onKill(PlayerDeathEvent event) {
         Player victim = event.getEntity();
         Player killer = victim.getKiller();
@@ -443,31 +509,43 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
             
             // Check if the killed player was the revenge target
             if (victim.getUniqueId().equals(task.getTargetUUID())) {
+                getLogger().info("Revenge successful! " + killer.getName() + " killed their target " + victim.getName());
+                
                 // Play success sound
                 killer.playSound(killer.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, SoundCategory.PLAYERS, 1.0f, 1.0f);
                 
                 // Cancel and remove the task first to prevent any race conditions
                 task.cancel();
                 revengeTasks.remove(killer.getUniqueId());
+                getLogger().info("Revenge task cancelled and removed for " + killer.getName());
                 
                 // Remove the revenge items
                 removeRevengeItems(killer);
+                getLogger().info("Revenge items removed from " + killer.getName());
                 
                 // Remove boss bar
                 task.bossBar.removeAll();
                 revengeBossBars.remove(killer.getUniqueId());
+                getLogger().info("Boss bar removed for " + killer.getName());
                 
                 // Teleport back to death location and set health to 1
                 Location deathLoc = deathLocations.get(killer.getUniqueId());
                 if (deathLoc != null) {
                     killer.teleport(deathLoc);
                     deathLocations.remove(killer.getUniqueId());
+                    getLogger().info(killer.getName() + " teleported back to death location");
+                } else {
+                    getLogger().warning("No death location found for " + killer.getName());
                 }
                 
                 Bukkit.getScheduler().runTaskLater(this, () -> {
                     killer.setHealth(1.0);
+                    killer.setFoodLevel(20); // Give full food
                     killer.sendMessage("§aRevenge successful! You've been returned to your death location.");
+                    getLogger().info("Health set to 1 and success message sent to " + killer.getName());
                 }, 1L);
+            } else {
+                getLogger().info("Kill detected but not revenge target: " + killer.getName() + " killed " + victim.getName());
             }
         }
     }
@@ -597,5 +675,17 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
             }
         }
         revengeTasks.clear();
+    }
+
+    private void spawnTeleportParticles(Player player, int count) {
+        Location loc = player.getLocation();
+        player.getWorld().spawnParticle(Particle.END_ROD, loc, count, 0.5, 0.5, 0.5, 0.1);
+        player.getWorld().spawnParticle(Particle.DRAGON_BREATH, loc, count/2, 0.5, 0.5, 0.5, 0.1);
+    }
+
+    private void spawnWarningParticles(Player player, int count) {
+        Location loc = player.getLocation();
+        player.getWorld().spawnParticle(Particle.CLOUD, loc, count, 0.5, 0.5, 0.5, 0.1);
+        player.getWorld().spawnParticle(Particle.FLAME, loc, count/2, 0.5, 0.5, 0.5, 0.1);
     }
 } 
