@@ -3,6 +3,9 @@ package com.deathrevenge;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
+import org.bukkit.boss.BossBar;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -24,6 +27,8 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
     private final Map<UUID, List<ItemStack>> revengeItems = new HashMap<>();
     private final Map<UUID, Player> pendingRevengeTargets = new HashMap<>();
     private final Map<UUID, Integer> respawnCountdowns = new HashMap<>();
+    private final Map<UUID, BossBar> revengeBossBars = new HashMap<>();
+    private final Map<UUID, Integer> targetWarnings = new HashMap<>();
     
     private int revengeTime;
     private int revengeFailBanDuration;
@@ -256,8 +261,27 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
         Player randomTarget = possibleTargets.get(new Random().nextInt(possibleTargets.size()));
         pendingRevengeTargets.put(victim.getUniqueId(), randomTarget);
         
-        victim.sendMessage("§cYou will be teleported to " + randomTarget.getName() + " for revenge when you respawn!");
-        randomTarget.sendMessage("§c" + victim.getName() + " will be hunting you for revenge!");
+        // Start warning countdown for the hunter
+        targetWarnings.put(victim.getUniqueId(), 5);
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                int warning = targetWarnings.get(victim.getUniqueId());
+                if (warning > 0) {
+                    victim.sendTitle(
+                        "§c§lPREPARE FOR REVENGE!",
+                        "§eYou will be teleported in " + warning + "...",
+                        0, 20, 0
+                    );
+                    targetWarnings.put(victim.getUniqueId(), warning - 1);
+                } else {
+                    targetWarnings.remove(victim.getUniqueId());
+                    this.cancel();
+                }
+            }
+        }.runTaskTimer(this, 0L, 20L); // Run every second
+        
+        victim.sendMessage("§cYou will be teleported to a random player for revenge when you respawn!");
     }
 
     @EventHandler
@@ -274,7 +298,11 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
                 public void run() {
                     int countdown = respawnCountdowns.get(player.getUniqueId());
                     if (countdown > 0) {
-                        player.sendMessage("§eTeleporting to your target in " + countdown + " seconds...");
+                        player.sendTitle(
+                            "§c§lGET READY!",
+                            "§eTeleporting in " + countdown + "...",
+                            0, 20, 0
+                        );
                         respawnCountdowns.put(player.getUniqueId(), countdown - 1);
                     } else {
                         respawnCountdowns.remove(player.getUniqueId());
@@ -330,7 +358,7 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
                         
                         revengeItems.put(player.getUniqueId(), items);
                         
-                        player.sendMessage("§cYou have " + revengeTime + " seconds to kill " + target.getName() + " for revenge!");
+                        player.sendMessage("§cYou have " + revengeTime + " seconds to kill your target for revenge!");
                         player.sendMessage("§eYou have been given a " + revengeSwordType.name().toLowerCase().replace("_", " ") + " for your revenge!");
 
                         // Create and start the revenge task
@@ -359,6 +387,10 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
                 // Remove the revenge items
                 removeRevengeItems(killer);
                 
+                // Remove boss bar
+                task.bossBar.removeAll();
+                revengeBossBars.remove(killer.getUniqueId());
+                
                 // Teleport back to death location and set health to 1
                 Location deathLoc = deathLocations.get(killer.getUniqueId());
                 if (deathLoc != null) {
@@ -377,27 +409,61 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
     private class RevengeTask extends BukkitRunnable {
         private final UUID playerUUID;
         private final UUID targetUUID;
+        private final BossBar bossBar;
+        private int timeLeft;
 
         public RevengeTask(Player player, Player target) {
             this.playerUUID = player.getUniqueId();
             this.targetUUID = target.getUniqueId();
+            this.timeLeft = revengeTime;
+            
+            // Create boss bar
+            this.bossBar = Bukkit.createBossBar(
+                "§cRevenge Time: " + timeLeft + "s",
+                BarColor.RED,
+                BarStyle.SOLID
+            );
+            
+            // Show boss bar to all players
+            for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
+                this.bossBar.addPlayer(onlinePlayer);
+            }
+            
+            // Update boss bar progress
+            this.bossBar.setProgress(1.0);
         }
 
         @Override
         public void run() {
             Player player = Bukkit.getPlayer(playerUUID);
             if (player != null && player.isOnline()) {
-                // Remove the revenge items
-                removeRevengeItems(player);
+                // Update boss bar
+                timeLeft--;
+                double progress = (double) timeLeft / revengeTime;
+                bossBar.setProgress(progress);
+                bossBar.setTitle("§cRevenge Time: " + timeLeft + "s");
                 
-                // Time's up - ban the player
-                Bukkit.getBanList(org.bukkit.BanList.Type.NAME).addBan(
-                    player.getName(),
-                    "Failed revenge attempt",
-                    new Date(System.currentTimeMillis() + (revengeFailBanDuration * 60000L)), // Convert minutes to milliseconds
-                    null
-                );
-                player.kickPlayer("Time's up! You failed your revenge attempt. You are banned for " + revengeFailBanDuration + " minutes!");
+                if (timeLeft <= 0) {
+                    // Remove the revenge items
+                    removeRevengeItems(player);
+                    
+                    // Remove boss bar
+                    bossBar.removeAll();
+                    revengeBossBars.remove(playerUUID);
+                    
+                    // Time's up - ban the player
+                    Bukkit.getBanList(org.bukkit.BanList.Type.NAME).addBan(
+                        player.getName(),
+                        "Failed revenge attempt",
+                        new Date(System.currentTimeMillis() + (revengeFailBanDuration * 60000L)), // Convert minutes to milliseconds
+                        null
+                    );
+                    player.kickPlayer("Time's up! You failed your revenge attempt. You are banned for " + revengeFailBanDuration + " minutes!");
+                }
+            } else {
+                // Player went offline, clean up
+                bossBar.removeAll();
+                revengeBossBars.remove(playerUUID);
             }
             revengeTasks.remove(playerUUID);
             deathLocations.remove(playerUUID);
