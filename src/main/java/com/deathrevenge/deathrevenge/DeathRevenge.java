@@ -8,16 +8,35 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.CommandSender;
 
 import java.util.*;
 
-public class DeathRevenge extends JavaPlugin implements Listener {
+public class DeathRevenge extends JavaPlugin implements Listener, CommandExecutor {
     private final Map<UUID, RevengeTask> revengeTasks = new HashMap<>();
     private final Map<UUID, Location> deathLocations = new HashMap<>();
 
     @Override
     public void onEnable() {
         getServer().getPluginManager().registerEvents(this, this);
+        getCommand("deathrevenge").setExecutor(this);
+        getCommand("dr").setExecutor(this);
+    }
+
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (command.getName().equalsIgnoreCase("deathrevenge") || command.getName().equalsIgnoreCase("dr")) {
+            sender.sendMessage("§6§lDeathRevenge Help");
+            sender.sendMessage("§eWhen you die, you will be given a chance for revenge!");
+            sender.sendMessage("§eYou will be teleported to a random player and have 30 seconds to kill them.");
+            sender.sendMessage("§cIf you fail to kill your target, you will be banned for 1 hour!");
+            sender.sendMessage("§aIf you succeed, you will be teleported back to your death location.");
+            sender.sendMessage("§eIf no players are online when you die, you will be banned for 30 minutes.");
+            return true;
+        }
+        return false;
     }
 
     @EventHandler
