@@ -6,6 +6,7 @@ import org.bukkit.Material;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
+import org.bukkit.boss.KeyedBossBar;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -51,6 +52,9 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
         
         // Load configuration values
         loadConfig();
+        
+        // Clean up any existing boss bars from previous runs
+        removeAllBossBars();
         
         getServer().getPluginManager().registerEvents(this, this);
         getCommand("deathrevenge").setExecutor(this);
@@ -165,17 +169,61 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
     private void removeRevengeItems(Player player) {
         List<ItemStack> items = revengeItems.remove(player.getUniqueId());
         if (items != null) {
+            // Remove all revenge items from inventory
             for (ItemStack item : items) {
                 if (item != null) {
                     player.getInventory().remove(item);
                 }
             }
+            
+            // Clear armor slots if they were used
+            if (revengeArmorEnabled) {
+                if (revengeHelmetType != Material.AIR) {
+                    player.getInventory().setHelmet(null);
+                }
+                if (revengeChestplateType != Material.AIR) {
+                    player.getInventory().setChestplate(null);
+                }
+                if (revengeLeggingsType != Material.AIR) {
+                    player.getInventory().setLeggings(null);
+                }
+                if (revengeBootsType != Material.AIR) {
+                    player.getInventory().setBoots(null);
+                }
+            }
         }
+    }
+
+    private void removeAllBossBars() {
+        // Remove all boss bars from the server
+        Iterator<KeyedBossBar> iterator = Bukkit.getBossBars();
+        while (iterator.hasNext()) {
+            KeyedBossBar bossBar = iterator.next();
+            bossBar.removeAll();
+            Bukkit.removeBossBar(bossBar.getKey());
+        }
+        revengeBossBars.clear();
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (command.getName().equalsIgnoreCase("deathrevenge")) {
+            if (args.length > 0 && args[0].equalsIgnoreCase("clearbars") && sender.hasPermission("deathrevenge.clearbars")) {
+                // Remove all boss bars from the server
+                removeAllBossBars();
+                
+                // Also cancel any running tasks
+                for (RevengeTask task : revengeTasks.values()) {
+                    if (task != null) {
+                        task.cancel();
+                    }
+                }
+                revengeTasks.clear();
+                
+                sender.sendMessage("§aAll boss bars have been cleared from the server!");
+                return true;
+            }
+            
             sender.sendMessage("§6§lDeathRevenge Help");
             sender.sendMessage("§eWhen you die, you will be given a chance for revenge!");
             sender.sendMessage("§eYou will be teleported to a random player and have " + revengeTime + " seconds to kill them.");
@@ -206,6 +254,8 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
             sender.sendMessage("§cIf you fail to kill your target, you will be banned for " + revengeFailBanDuration + " minutes!");
             sender.sendMessage("§aIf you succeed, you will be teleported back to your death location.");
             sender.sendMessage("§eIf no players are online when you die, you will be banned for " + noPlayersBanDuration + " minutes.");
+            sender.sendMessage("§6§lCommands:");
+            sender.sendMessage("§e/deathrevenge clearbars §7- Remove all revenge boss bars (requires permission)");
             return true;
         }
         return false;
@@ -235,6 +285,12 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
                 )
             );
             victim.kickPlayer("You failed your revenge attempt. You are banned for " + revengeFailBanDuration + " minutes!");
+            return;
+        }
+
+        // Don't give revenge if the player was killed by someone in revenge mode
+        if (killer != null && revengeTasks.containsKey(killer.getUniqueId())) {
+            victim.sendMessage("§cYou were killed by a revenge seeker. No revenge for you!");
             return;
         }
 
@@ -287,6 +343,11 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
     @EventHandler
     public void onPlayerRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
+        
+        // First, check if this player has any revenge items and remove them
+        removeRevengeItems(player);
+        
+        // Then check if they have a pending revenge
         Player target = pendingRevengeTargets.remove(player.getUniqueId());
         
         if (target != null && target.isOnline()) {
@@ -364,7 +425,6 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
                         // Create and start the revenge task
                         RevengeTask revengeTask = new RevengeTask(player, target);
                         revengeTasks.put(player.getUniqueId(), revengeTask);
-                        Bukkit.getScheduler().runTaskLater(DeathRevenge.this, () -> revengeTask.run(), revengeTime * 20L);
                     }
                 }
             }.runTaskTimer(this, 0L, 20L); // Run every second
@@ -381,6 +441,7 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
             
             // Check if the killed player was the revenge target
             if (victim.getUniqueId().equals(task.getTargetUUID())) {
+                // Cancel and remove the task first to prevent any race conditions
                 task.cancel();
                 revengeTasks.remove(killer.getUniqueId());
                 
@@ -411,11 +472,14 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
         private final UUID targetUUID;
         private final BossBar bossBar;
         private int timeLeft;
+        private final long startTime;
+        private boolean isCancelled = false;
 
         public RevengeTask(Player player, Player target) {
             this.playerUUID = player.getUniqueId();
             this.targetUUID = target.getUniqueId();
             this.timeLeft = revengeTime;
+            this.startTime = System.currentTimeMillis();
             
             // Create boss bar
             this.bossBar = Bukkit.createBossBar(
@@ -431,14 +495,27 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
             
             // Update boss bar progress
             this.bossBar.setProgress(1.0);
+            
+            // Store the boss bar
+            revengeBossBars.put(playerUUID, bossBar);
+            
+            // Start the task to run every tick
+            this.runTaskTimer(DeathRevenge.this, 0L, 1L);
         }
 
         @Override
         public void run() {
+            if (isCancelled) {
+                return;
+            }
+
             Player player = Bukkit.getPlayer(playerUUID);
             if (player != null && player.isOnline()) {
+                // Calculate time left based on actual elapsed time
+                long elapsedTime = (System.currentTimeMillis() - startTime) / 1000;
+                timeLeft = Math.max(0, revengeTime - (int)elapsedTime);
+                
                 // Update boss bar
-                timeLeft--;
                 double progress = (double) timeLeft / revengeTime;
                 bossBar.setProgress(progress);
                 bossBar.setTitle("§cRevenge Time: " + timeLeft + "s");
@@ -451,20 +528,44 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
                     bossBar.removeAll();
                     revengeBossBars.remove(playerUUID);
                     
-                    // Time's up - ban the player
-                    Bukkit.getBanList(org.bukkit.BanList.Type.NAME).addBan(
-                        player.getName(),
-                        "Failed revenge attempt",
-                        new Date(System.currentTimeMillis() + (revengeFailBanDuration * 60000L)), // Convert minutes to milliseconds
-                        null
-                    );
-                    player.kickPlayer("Time's up! You failed your revenge attempt. You are banned for " + revengeFailBanDuration + " minutes!");
+                    // Teleport player to their spawnpoint before banning
+                    Location spawnLocation = player.getBedSpawnLocation();
+                    if (spawnLocation == null) {
+                        spawnLocation = player.getWorld().getSpawnLocation();
+                    }
+                    Location finalSpawnLocation = spawnLocation;
+                    
+                    // Time's up - teleport and ban the player
+                    Bukkit.getScheduler().runTask(DeathRevenge.this, () -> {
+                        player.teleport(finalSpawnLocation);
+                        Bukkit.getBanList(org.bukkit.BanList.Type.NAME).addBan(
+                            player.getName(),
+                            "Failed revenge attempt",
+                            new Date(System.currentTimeMillis() + (revengeFailBanDuration * 60000L)), // Convert minutes to milliseconds
+                            null
+                        );
+                        player.kickPlayer("Time's up! You failed your revenge attempt. You are banned for " + revengeFailBanDuration + " minutes!");
+                    });
+                
+                    // Cancel this task
+                    this.cancel();
+                    revengeTasks.remove(playerUUID);
+                    deathLocations.remove(playerUUID);
                 }
             } else {
                 // Player went offline, clean up
                 bossBar.removeAll();
                 revengeBossBars.remove(playerUUID);
+                this.cancel();
+                revengeTasks.remove(playerUUID);
+                deathLocations.remove(playerUUID);
             }
+        }
+
+        @Override
+        public void cancel() {
+            isCancelled = true;
+            super.cancel();
             revengeTasks.remove(playerUUID);
             deathLocations.remove(playerUUID);
         }
@@ -472,5 +573,24 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
         public UUID getTargetUUID() {
             return targetUUID;
         }
+    }
+
+    @Override
+    public void onDisable() {
+        // Clean up all boss bars when plugin is disabled
+        for (BossBar bossBar : revengeBossBars.values()) {
+            if (bossBar != null) {
+                bossBar.removeAll();
+            }
+        }
+        revengeBossBars.clear();
+        
+        // Also clean up any running tasks
+        for (RevengeTask task : revengeTasks.values()) {
+            if (task != null) {
+                task.cancel();
+            }
+        }
+        revengeTasks.clear();
     }
 } 
