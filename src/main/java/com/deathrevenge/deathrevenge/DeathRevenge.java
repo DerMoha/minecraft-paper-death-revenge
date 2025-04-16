@@ -50,7 +50,19 @@ public class DeathRevenge extends JavaPlugin implements Listener {
         // Find a random player that isn't the victim
         List<Player> possibleTargets = new ArrayList<>(Bukkit.getOnlinePlayers());
         possibleTargets.remove(victim);
-        if (possibleTargets.isEmpty()) return; // TODO: Add a message to the victim
+        if (possibleTargets.isEmpty()) {
+            // Ban the player for 30 minutes when no other players are online
+            Bukkit.getScheduler().runTask(this, () -> 
+                Bukkit.getBanList(org.bukkit.BanList.Type.NAME).addBan(
+                    victim.getName(),
+                    "No players available for revenge",
+                    new Date(System.currentTimeMillis() + 1800000), // 30 minutes
+                    null
+                )
+            );
+            victim.kickPlayer("No players available for revenge. You are banned for 30 minutes!");
+            return;
+        }
 
         Player randomTarget = possibleTargets.get(new Random().nextInt(possibleTargets.size()));
 
