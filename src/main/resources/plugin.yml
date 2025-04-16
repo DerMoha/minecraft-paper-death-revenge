@@ -1,0 +1,5 @@
+name: DeathRevenge
+version: '1.0'
+main: com.example.deathrevenge.DeathRevenge
+api-version: '1.21'
+description: A plugin that gives players a chance for revenge after death 
