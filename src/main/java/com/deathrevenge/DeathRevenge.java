@@ -19,6 +19,8 @@ import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.Sound;
+import org.bukkit.SoundCategory;
 
 import java.util.*;
 
@@ -275,6 +277,9 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
             // Remove the revenge items
             removeRevengeItems(victim);
             
+            // Play fail sound
+            victim.playSound(victim.getLocation(), Sound.ENTITY_ENDER_DRAGON_DEATH, SoundCategory.PLAYERS, 1.0f, 1.0f);
+            
             // Ban the player for configured duration
             Bukkit.getScheduler().runTask(this, () -> 
                 Bukkit.getBanList(org.bukkit.BanList.Type.NAME).addBan(
@@ -290,6 +295,7 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
 
         // Don't give revenge if the player was killed by someone in revenge mode
         if (killer != null && revengeTasks.containsKey(killer.getUniqueId())) {
+            victim.playSound(victim.getLocation(), Sound.ENTITY_VILLAGER_NO, SoundCategory.PLAYERS, 1.0f, 1.0f);
             victim.sendMessage("§cYou were killed by a revenge seeker. No revenge for you!");
             return;
         }
@@ -301,6 +307,9 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
         List<Player> possibleTargets = new ArrayList<>(Bukkit.getOnlinePlayers());
         possibleTargets.remove(victim);
         if (possibleTargets.isEmpty()) {
+            // Play fail sound
+            victim.playSound(victim.getLocation(), Sound.ENTITY_ENDER_DRAGON_DEATH, SoundCategory.PLAYERS, 1.0f, 1.0f);
+            
             // Ban the player for configured duration when no other players are online
             Bukkit.getScheduler().runTask(this, () -> 
                 Bukkit.getBanList(org.bukkit.BanList.Type.NAME).addBan(
@@ -317,25 +326,8 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
         Player randomTarget = possibleTargets.get(new Random().nextInt(possibleTargets.size()));
         pendingRevengeTargets.put(victim.getUniqueId(), randomTarget);
         
-        // Start warning countdown for the hunter
-        targetWarnings.put(victim.getUniqueId(), 5);
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                int warning = targetWarnings.get(victim.getUniqueId());
-                if (warning > 0) {
-                    victim.sendTitle(
-                        "§c§lPREPARE FOR REVENGE!",
-                        "§eYou will be teleported in " + warning + "...",
-                        0, 20, 0
-                    );
-                    targetWarnings.put(victim.getUniqueId(), warning - 1);
-                } else {
-                    targetWarnings.remove(victim.getUniqueId());
-                    this.cancel();
-                }
-            }
-        }.runTaskTimer(this, 0L, 20L); // Run every second
+        // Play revenge sound
+        victim.playSound(victim.getLocation(), Sound.ENTITY_WITHER_SPAWN, SoundCategory.PLAYERS, 1.0f, 1.0f);
         
         victim.sendMessage("§cYou will be teleported to a random player for revenge when you respawn!");
     }
@@ -354,6 +346,9 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
             // Start a countdown before teleporting
             respawnCountdowns.put(player.getUniqueId(), 5); // 5 seconds countdown
             
+            // Play initial revenge sound
+            player.playSound(player.getLocation(), Sound.ENTITY_WITHER_SPAWN, SoundCategory.PLAYERS, 1.0f, 1.0f);
+            
             new BukkitRunnable() {
                 @Override
                 public void run() {
@@ -364,10 +359,14 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
                             "§eTeleporting in " + countdown + "...",
                             0, 20, 0
                         );
+                        player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, SoundCategory.PLAYERS, 1.0f, 1.0f);
                         respawnCountdowns.put(player.getUniqueId(), countdown - 1);
                     } else {
                         respawnCountdowns.remove(player.getUniqueId());
                         this.cancel();
+                        
+                        // Play teleport sound
+                        player.playSound(player.getLocation(), Sound.ENTITY_ENDERMAN_TELEPORT, SoundCategory.PLAYERS, 1.0f, 1.0f);
                         
                         // Now teleport and give items
                         player.teleport(target.getLocation());
@@ -419,6 +418,9 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
                         
                         revengeItems.put(player.getUniqueId(), items);
                         
+                        // Play item receive sound
+                        player.playSound(player.getLocation(), Sound.ENTITY_ITEM_PICKUP, SoundCategory.PLAYERS, 1.0f, 1.0f);
+                        
                         player.sendMessage("§cYou have " + revengeTime + " seconds to kill your target for revenge!");
                         player.sendMessage("§eYou have been given a " + revengeSwordType.name().toLowerCase().replace("_", " ") + " for your revenge!");
 
@@ -441,6 +443,9 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
             
             // Check if the killed player was the revenge target
             if (victim.getUniqueId().equals(task.getTargetUUID())) {
+                // Play success sound
+                killer.playSound(killer.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, SoundCategory.PLAYERS, 1.0f, 1.0f);
+                
                 // Cancel and remove the task first to prevent any race conditions
                 task.cancel();
                 revengeTasks.remove(killer.getUniqueId());
