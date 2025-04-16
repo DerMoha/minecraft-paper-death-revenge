@@ -1,4 +1,4 @@
-package com.deathrevenge.deathrevenge;
+package com.deathrevenge;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -21,6 +22,8 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
     private final Map<UUID, RevengeTask> revengeTasks = new HashMap<>();
     private final Map<UUID, Location> deathLocations = new HashMap<>();
     private final Map<UUID, List<ItemStack>> revengeItems = new HashMap<>();
+    private final Map<UUID, Player> pendingRevengeTargets = new HashMap<>();
+    private final Map<UUID, Integer> respawnCountdowns = new HashMap<>();
     
     private int revengeTime;
     private int revengeFailBanDuration;
@@ -46,7 +49,6 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
         
         getServer().getPluginManager().registerEvents(this, this);
         getCommand("deathrevenge").setExecutor(this);
-        getCommand("dr").setExecutor(this);
     }
     
     private void loadConfig() {
@@ -168,7 +170,7 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (command.getName().equalsIgnoreCase("deathrevenge") || command.getName().equalsIgnoreCase("dr")) {
+        if (command.getName().equalsIgnoreCase("deathrevenge")) {
             sender.sendMessage("§6§lDeathRevenge Help");
             sender.sendMessage("§eWhen you die, you will be given a chance for revenge!");
             sender.sendMessage("§eYou will be teleported to a random player and have " + revengeTime + " seconds to kill them.");
@@ -252,69 +254,93 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
         }
 
         Player randomTarget = possibleTargets.get(new Random().nextInt(possibleTargets.size()));
+        pendingRevengeTargets.put(victim.getUniqueId(), randomTarget);
+        
+        victim.sendMessage("§cYou will be teleported to " + randomTarget.getName() + " for revenge when you respawn!");
+        randomTarget.sendMessage("§c" + victim.getName() + " will be hunting you for revenge!");
+    }
 
-        // Teleport the victim to the random target
-        Bukkit.getScheduler().runTaskLater(this, () -> {
-            if (victim.isOnline()) {
-                victim.teleport(randomTarget.getLocation());
-                
-                // Give the revenge items
-                List<ItemStack> items = new ArrayList<>();
-                
-                // Give sword
-                ItemStack revengeSword = createRevengeSword();
-                victim.getInventory().addItem(revengeSword);
-                items.add(revengeSword);
-                
-                // Give armor if enabled
-                if (revengeArmorEnabled) {
-                    List<String> armorPieces = new ArrayList<>();
-                    
-                    ItemStack helmet = createRevengeArmor(revengeHelmetType);
-                    if (helmet != null) {
-                        victim.getInventory().setHelmet(helmet);
-                        items.add(helmet);
-                        armorPieces.add(helmet.getType().name().toLowerCase().replace("_", " "));
-                    }
-                    
-                    ItemStack chestplate = createRevengeArmor(revengeChestplateType);
-                    if (chestplate != null) {
-                        victim.getInventory().setChestplate(chestplate);
-                        items.add(chestplate);
-                        armorPieces.add(chestplate.getType().name().toLowerCase().replace("_", " "));
-                    }
-                    
-                    ItemStack leggings = createRevengeArmor(revengeLeggingsType);
-                    if (leggings != null) {
-                        victim.getInventory().setLeggings(leggings);
-                        items.add(leggings);
-                        armorPieces.add(leggings.getType().name().toLowerCase().replace("_", " "));
-                    }
-                    
-                    ItemStack boots = createRevengeArmor(revengeBootsType);
-                    if (boots != null) {
-                        victim.getInventory().setBoots(boots);
-                        items.add(boots);
-                        armorPieces.add(boots.getType().name().toLowerCase().replace("_", " "));
-                    }
-                    
-                    if (!armorPieces.isEmpty()) {
-                        victim.sendMessage("§eYou have been given " + String.join(", ", armorPieces) + " to mark you as a revenge seeker!");
+    @EventHandler
+    public void onPlayerRespawn(PlayerRespawnEvent event) {
+        Player player = event.getPlayer();
+        Player target = pendingRevengeTargets.remove(player.getUniqueId());
+        
+        if (target != null && target.isOnline()) {
+            // Start a countdown before teleporting
+            respawnCountdowns.put(player.getUniqueId(), 5); // 5 seconds countdown
+            
+            new BukkitRunnable() {
+                @Override
+                public void run() {
+                    int countdown = respawnCountdowns.get(player.getUniqueId());
+                    if (countdown > 0) {
+                        player.sendMessage("§eTeleporting to your target in " + countdown + " seconds...");
+                        respawnCountdowns.put(player.getUniqueId(), countdown - 1);
+                    } else {
+                        respawnCountdowns.remove(player.getUniqueId());
+                        this.cancel();
+                        
+                        // Now teleport and give items
+                        player.teleport(target.getLocation());
+                        
+                        // Give the revenge items
+                        List<ItemStack> items = new ArrayList<>();
+                        
+                        // Give sword
+                        ItemStack revengeSword = createRevengeSword();
+                        player.getInventory().addItem(revengeSword);
+                        items.add(revengeSword);
+                        
+                        // Give armor if enabled
+                        if (revengeArmorEnabled) {
+                            List<String> armorPieces = new ArrayList<>();
+                            
+                            ItemStack helmet = createRevengeArmor(revengeHelmetType);
+                            if (helmet != null) {
+                                player.getInventory().setHelmet(helmet);
+                                items.add(helmet);
+                                armorPieces.add(helmet.getType().name().toLowerCase().replace("_", " "));
+                            }
+                            
+                            ItemStack chestplate = createRevengeArmor(revengeChestplateType);
+                            if (chestplate != null) {
+                                player.getInventory().setChestplate(chestplate);
+                                items.add(chestplate);
+                                armorPieces.add(chestplate.getType().name().toLowerCase().replace("_", " "));
+                            }
+                            
+                            ItemStack leggings = createRevengeArmor(revengeLeggingsType);
+                            if (leggings != null) {
+                                player.getInventory().setLeggings(leggings);
+                                items.add(leggings);
+                                armorPieces.add(leggings.getType().name().toLowerCase().replace("_", " "));
+                            }
+                            
+                            ItemStack boots = createRevengeArmor(revengeBootsType);
+                            if (boots != null) {
+                                player.getInventory().setBoots(boots);
+                                items.add(boots);
+                                armorPieces.add(boots.getType().name().toLowerCase().replace("_", " "));
+                            }
+                            
+                            if (!armorPieces.isEmpty()) {
+                                player.sendMessage("§eYou have been given " + String.join(", ", armorPieces) + " to mark you as a revenge seeker!");
+                            }
+                        }
+                        
+                        revengeItems.put(player.getUniqueId(), items);
+                        
+                        player.sendMessage("§cYou have " + revengeTime + " seconds to kill " + target.getName() + " for revenge!");
+                        player.sendMessage("§eYou have been given a " + revengeSwordType.name().toLowerCase().replace("_", " ") + " for your revenge!");
+
+                        // Create and start the revenge task
+                        RevengeTask revengeTask = new RevengeTask(player, target);
+                        revengeTasks.put(player.getUniqueId(), revengeTask);
+                        Bukkit.getScheduler().runTaskLater(DeathRevenge.this, () -> revengeTask.run(), revengeTime * 20L);
                     }
                 }
-                
-                revengeItems.put(victim.getUniqueId(), items);
-                
-                victim.sendMessage("§cYou have " + revengeTime + " seconds to kill " + randomTarget.getName() + " for revenge!");
-                victim.sendMessage("§eYou have been given a " + revengeSwordType.name().toLowerCase().replace("_", " ") + " for your revenge!");
-                randomTarget.sendMessage("§c" + victim.getName() + " is hunting you for revenge!");
-
-                // Create and start the revenge task
-                RevengeTask revengeTask = new RevengeTask(victim, randomTarget);
-                revengeTasks.put(victim.getUniqueId(), revengeTask);
-                revengeTask.runTaskLater(this, revengeTime * 20L); // Convert seconds to ticks
-            }
-        }, 1L); // Small delay after death
+            }.runTaskTimer(this, 0L, 20L); // Run every second
+        }
     }
 
     @EventHandler
