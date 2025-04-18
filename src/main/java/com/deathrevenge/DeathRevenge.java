@@ -55,74 +55,91 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
 
     @Override
     public void onEnable() {
+        getLogger().info("DeathRevenge is starting up...");
+        
         // Save default config if it doesn't exist
         saveDefaultConfig();
+        getLogger().info("Config saved/loaded");
         
         // Load configuration values
         loadConfig();
+        getLogger().info("Configuration values loaded");
         
         // Clean up any existing boss bars from previous runs
         removeAllBossBars();
+        getLogger().info("Existing boss bars cleaned up");
         
         getServer().getPluginManager().registerEvents(this, this);
         getCommand("deathrevenge").setExecutor(this);
+        getLogger().info("Events and commands registered");
+        
+        getLogger().info("DeathRevenge has been enabled!");
     }
     
     private void loadConfig() {
-        revengeTime = getConfig().getInt("revenge-time", 30);
-        revengeFailBanDuration = getConfig().getInt("ban-durations.revenge-fail", 60);
-        noPlayersBanDuration = getConfig().getInt("ban-durations.no-players", 30);
-        targetCooldown = getConfig().getInt("target-cooldown", 300);
-        
-        // Load sword configuration
-        String swordType = getConfig().getString("revenge-sword.type", "DIAMOND_SWORD");
         try {
-            revengeSwordType = Material.valueOf(swordType);
-        } catch (IllegalArgumentException e) {
-            getLogger().warning("Invalid sword type in config: " + swordType + ". Using DIAMOND_SWORD instead.");
-            revengeSwordType = Material.DIAMOND_SWORD;
+            revengeTime = getConfig().getInt("revenge-time", 30);
+            revengeFailBanDuration = getConfig().getInt("ban-durations.revenge-fail", 60);
+            noPlayersBanDuration = getConfig().getInt("ban-durations.no-players", 30);
+            targetCooldown = getConfig().getInt("target-cooldown", 300);
+            getLogger().info("Loaded timings: revenge=" + revengeTime + "s, fail-ban=" + revengeFailBanDuration + "m, no-players-ban=" + noPlayersBanDuration + "m, target-cooldown=" + targetCooldown + "s");
+            
+            // Load sword configuration
+            String swordType = getConfig().getString("revenge-sword.type", "DIAMOND_SWORD");
+            try {
+                revengeSwordType = Material.valueOf(swordType);
+                getLogger().info("Loaded revenge sword type: " + revengeSwordType);
+            } catch (IllegalArgumentException e) {
+                getLogger().warning("Invalid sword type in config: " + swordType + ". Using DIAMOND_SWORD instead.");
+                revengeSwordType = Material.DIAMOND_SWORD;
+            }
+            
+            revengeSwordEnchanted = getConfig().getBoolean("revenge-sword.enchanted", true);
+            revengeSwordEnchantments = getConfig().getStringList("revenge-sword.enchantments");
+            getLogger().info("Loaded sword enchantments: " + revengeSwordEnchantments);
+            
+            // Load armor configuration
+            revengeArmorEnabled = getConfig().getBoolean("revenge-armor.enabled", true);
+            getLogger().info("Revenge armor enabled: " + revengeArmorEnabled);
+            
+            String helmetType = getConfig().getString("revenge-armor.helmet", "CHAINMAIL_HELMET");
+            try {
+                revengeHelmetType = Material.valueOf(helmetType);
+            } catch (IllegalArgumentException e) {
+                getLogger().warning("Invalid helmet type in config: " + helmetType + ". Using CHAINMAIL_HELMET instead.");
+                revengeHelmetType = Material.CHAINMAIL_HELMET;
+            }
+            
+            String chestplateType = getConfig().getString("revenge-armor.chestplate", "CHAINMAIL_CHESTPLATE");
+            try {
+                revengeChestplateType = Material.valueOf(chestplateType);
+            } catch (IllegalArgumentException e) {
+                getLogger().warning("Invalid chestplate type in config: " + chestplateType + ". Using CHAINMAIL_CHESTPLATE instead.");
+                revengeChestplateType = Material.CHAINMAIL_CHESTPLATE;
+            }
+            
+            String leggingsType = getConfig().getString("revenge-armor.leggings", "NONE");
+            try {
+                revengeLeggingsType = Material.valueOf(leggingsType);
+            } catch (IllegalArgumentException e) {
+                getLogger().warning("Invalid leggings type in config: " + leggingsType + ". Using AIR instead.");
+                revengeLeggingsType = Material.AIR;
+            }
+            
+            String bootsType = getConfig().getString("revenge-armor.boots", "NONE");
+            try {
+                revengeBootsType = Material.valueOf(bootsType);
+            } catch (IllegalArgumentException e) {
+                getLogger().warning("Invalid boots type in config: " + bootsType + ". Using AIR instead.");
+                revengeBootsType = Material.AIR;
+            }
+            
+            revengeArmorEnchanted = getConfig().getBoolean("revenge-armor.enchanted", true);
+            revengeArmorEnchantments = getConfig().getStringList("revenge-armor.enchantments");
+        } catch (Exception e) {
+            getLogger().severe("Error loading configuration: " + e.getMessage());
+            e.printStackTrace();
         }
-        
-        revengeSwordEnchanted = getConfig().getBoolean("revenge-sword.enchanted", true);
-        revengeSwordEnchantments = getConfig().getStringList("revenge-sword.enchantments");
-        
-        // Load armor configuration
-        revengeArmorEnabled = getConfig().getBoolean("revenge-armor.enabled", true);
-        
-        String helmetType = getConfig().getString("revenge-armor.helmet", "CHAINMAIL_HELMET");
-        try {
-            revengeHelmetType = Material.valueOf(helmetType);
-        } catch (IllegalArgumentException e) {
-            getLogger().warning("Invalid helmet type in config: " + helmetType + ". Using CHAINMAIL_HELMET instead.");
-            revengeHelmetType = Material.CHAINMAIL_HELMET;
-        }
-        
-        String chestplateType = getConfig().getString("revenge-armor.chestplate", "CHAINMAIL_CHESTPLATE");
-        try {
-            revengeChestplateType = Material.valueOf(chestplateType);
-        } catch (IllegalArgumentException e) {
-            getLogger().warning("Invalid chestplate type in config: " + chestplateType + ". Using CHAINMAIL_CHESTPLATE instead.");
-            revengeChestplateType = Material.CHAINMAIL_CHESTPLATE;
-        }
-        
-        String leggingsType = getConfig().getString("revenge-armor.leggings", "NONE");
-        try {
-            revengeLeggingsType = Material.valueOf(leggingsType);
-        } catch (IllegalArgumentException e) {
-            getLogger().warning("Invalid leggings type in config: " + leggingsType + ". Using AIR instead.");
-            revengeLeggingsType = Material.AIR;
-        }
-        
-        String bootsType = getConfig().getString("revenge-armor.boots", "NONE");
-        try {
-            revengeBootsType = Material.valueOf(bootsType);
-        } catch (IllegalArgumentException e) {
-            getLogger().warning("Invalid boots type in config: " + bootsType + ". Using AIR instead.");
-            revengeBootsType = Material.AIR;
-        }
-        
-        revengeArmorEnchanted = getConfig().getBoolean("revenge-armor.enchanted", true);
-        revengeArmorEnchantments = getConfig().getStringList("revenge-armor.enchantments");
     }
 
     private ItemStack createRevengeSword() {
@@ -288,9 +305,11 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player victim = event.getEntity();
         Player killer = victim.getKiller();
+        getLogger().info("Player death: " + victim.getName() + (killer != null ? " killed by " + killer.getName() : ""));
 
         // If this player was in revenge mode and failed to kill their target 
         if (revengeTasks.containsKey(victim.getUniqueId())) {
+            getLogger().info("Revenge failed: " + victim.getName() + " died during revenge");
             RevengeTask task = revengeTasks.get(victim.getUniqueId());
             task.cancel();
             revengeTasks.remove(victim.getUniqueId());
@@ -306,7 +325,7 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
                 Bukkit.getBanList(org.bukkit.BanList.Type.NAME).addBan(
                     victim.getName(),
                     "Failed revenge attempt",
-                    new Date(System.currentTimeMillis() + (revengeFailBanDuration * 60000L)), // Convert minutes to milliseconds
+                    new Date(System.currentTimeMillis() + (revengeFailBanDuration * 60000L)),
                     null
                 )
             );
@@ -345,7 +364,17 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
             return cooldownEnd != null && cooldownEnd > System.currentTimeMillis();
         });
         
+        // Don't ban if the player was in revenge mode and killed their target
+        if (revengeTasks.containsKey(victim.getUniqueId())) {
+            RevengeTask task = revengeTasks.get(victim.getUniqueId());
+            if (killer != null && killer.getUniqueId().equals(task.getTargetUUID())) {
+                getLogger().info("Revenge successful: " + victim.getName() + " killed by their target " + killer.getName());
+                return;
+            }
+        }
+        
         if (possibleTargets.isEmpty()) {
+            getLogger().info("No valid targets available for " + victim.getName());
             // Play fail sound
             victim.playSound(victim.getLocation(), Sound.ENTITY_ENDER_DRAGON_DEATH, SoundCategory.PLAYERS, 1.0f, 1.0f);
             
@@ -374,6 +403,7 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
     @EventHandler
     public void onPlayerRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
+        getLogger().info("Player respawn: " + player.getName());
         
         // First, check if this player has any revenge items and remove them
         removeRevengeItems(player);
@@ -382,6 +412,7 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
         Player target = pendingRevengeTargets.remove(player.getUniqueId());
         
         if (target != null && target.isOnline()) {
+            getLogger().info("Starting revenge for " + player.getName() + " targeting " + target.getName());
             // Start a countdown before teleporting
             respawnCountdowns.put(player.getUniqueId(), 5); // 5 seconds countdown
             
@@ -492,17 +523,19 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
+        getLogger().info("Player quit: " + player.getName());
         
         // If player was a revenge target, find new targets for their hunters
         for (Map.Entry<UUID, RevengeTask> entry : new HashMap<>(revengeTasks).entrySet()) {
             RevengeTask task = entry.getValue();
             if (task.getTargetUUID().equals(player.getUniqueId())) {
+                getLogger().info("Target " + player.getName() + " quit during revenge");
                 // The target logged out, cancel the revenge
                 Player hunter = Bukkit.getPlayer(entry.getKey());
                 if (hunter != null) {
                     hunter.sendMessage("§cYour revenge target logged out. Revenge cancelled.");
                     hunter.playSound(hunter.getLocation(), Sound.ENTITY_VILLAGER_NO, SoundCategory.PLAYERS, 1.0f, 1.0f);
-                    spawnWarningParticles(hunter, 20); // Add particles for visual feedback
+                    spawnWarningParticles(hunter, 20);
                 }
                 task.cancel();
                 revengeTasks.remove(entry.getKey());
@@ -512,17 +545,19 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
                 
                 // Set cooldown for the target
                 targetCooldowns.put(player.getUniqueId(), System.currentTimeMillis() + (targetCooldown * 1000L));
+                getLogger().info("Set cooldown for " + player.getName() + " until " + new Date(targetCooldowns.get(player.getUniqueId())));
             }
         }
         
         // If player was in revenge mode, cancel their revenge
         if (revengeTasks.containsKey(player.getUniqueId())) {
+            getLogger().info("Hunter " + player.getName() + " quit during revenge");
             RevengeTask task = revengeTasks.get(player.getUniqueId());
             Player target = Bukkit.getPlayer(task.getTargetUUID());
             if (target != null) {
                 target.sendMessage("§aYour revenge seeker has logged out. You're safe... for now.");
                 target.playSound(target.getLocation(), Sound.ENTITY_VILLAGER_YES, SoundCategory.PLAYERS, 1.0f, 1.0f);
-                spawnTeleportParticles(target, 20); // Add particles for visual feedback
+                spawnTeleportParticles(target, 20);
             }
             task.cancel();
             revengeTasks.remove(player.getUniqueId());
@@ -693,6 +728,8 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
 
     @Override
     public void onDisable() {
+        getLogger().info("DeathRevenge is shutting down...");
+        
         // Clean up all boss bars when plugin is disabled
         for (BossBar bossBar : revengeBossBars.values()) {
             if (bossBar != null) {
@@ -700,6 +737,7 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
             }
         }
         revengeBossBars.clear();
+        getLogger().info("Cleaned up boss bars");
         
         // Also clean up any running tasks
         for (RevengeTask task : revengeTasks.values()) {
@@ -708,6 +746,9 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
             }
         }
         revengeTasks.clear();
+        getLogger().info("Cleaned up revenge tasks");
+        
+        getLogger().info("DeathRevenge has been disabled!");
     }
 
     private void spawnTeleportParticles(Player player, int count) {
