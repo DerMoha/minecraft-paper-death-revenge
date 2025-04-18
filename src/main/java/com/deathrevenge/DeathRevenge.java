@@ -36,10 +36,12 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
     private final Map<UUID, Integer> respawnCountdowns = new HashMap<>();
     private final Map<UUID, BossBar> revengeBossBars = new HashMap<>();
     private final Map<UUID, Integer> targetWarnings = new HashMap<>();
+    private final Map<UUID, Long> targetCooldowns = new HashMap<>();
     
     private int revengeTime;
     private int revengeFailBanDuration;
     private int noPlayersBanDuration;
+    private int targetCooldown;
     private Material revengeSwordType;
     private boolean revengeSwordEnchanted;
     private List<String> revengeSwordEnchantments;
@@ -70,6 +72,7 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
         revengeTime = getConfig().getInt("revenge-time", 30);
         revengeFailBanDuration = getConfig().getInt("ban-durations.revenge-fail", 60);
         noPlayersBanDuration = getConfig().getInt("ban-durations.no-players", 30);
+        targetCooldown = getConfig().getInt("target-cooldown", 300);
         
         // Load sword configuration
         String swordType = getConfig().getString("revenge-sword.type", "DIAMOND_SWORD");
@@ -214,20 +217,32 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (command.getName().equalsIgnoreCase("deathrevenge")) {
-            if (args.length > 0 && args[0].equalsIgnoreCase("clearbars") && sender.hasPermission("deathrevenge.clearbars")) {
-                // Remove all boss bars from the server
-                removeAllBossBars();
-                
-                // Also cancel any running tasks
-                for (RevengeTask task : revengeTasks.values()) {
-                    if (task != null) {
-                        task.cancel();
+            if (args.length > 0) {
+                if (args[0].equalsIgnoreCase("clearbars") && sender.hasPermission("deathrevenge.clearbars")) {
+                    // Remove all boss bars from the server
+                    removeAllBossBars();
+                    
+                    // Also cancel any running tasks
+                    for (RevengeTask task : revengeTasks.values()) {
+                        if (task != null) {
+                            task.cancel();
+                        }
                     }
+                    revengeTasks.clear();
+                    
+                    sender.sendMessage("§aAll boss bars have been cleared from the server!");
+                    return true;
+                } else if (args[0].equalsIgnoreCase("cooldown") && sender instanceof Player) {
+                    Player player = (Player) sender;
+                    Long cooldownEnd = targetCooldowns.get(player.getUniqueId());
+                    if (cooldownEnd != null && cooldownEnd > System.currentTimeMillis()) {
+                        long secondsLeft = (cooldownEnd - System.currentTimeMillis()) / 1000;
+                        sender.sendMessage("§eYou cannot be targeted for revenge for " + secondsLeft + " more seconds.");
+                    } else {
+                        sender.sendMessage("§aYou can be targeted for revenge now!");
+                    }
+                    return true;
                 }
-                revengeTasks.clear();
-                
-                sender.sendMessage("§aAll boss bars have been cleared from the server!");
-                return true;
             }
             
             sender.sendMessage("§6§lDeathRevenge Help");
@@ -260,8 +275,10 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
             sender.sendMessage("§cIf you fail to kill your target, you will be banned for " + revengeFailBanDuration + " minutes!");
             sender.sendMessage("§aIf you succeed, you will be teleported back to your death location.");
             sender.sendMessage("§eIf no players are online when you die, you will be banned for " + noPlayersBanDuration + " minutes.");
+            sender.sendMessage("§ePlayers cannot be targeted for revenge for " + targetCooldown + " seconds after being a target.");
             sender.sendMessage("§6§lCommands:");
             sender.sendMessage("§e/deathrevenge clearbars §7- Remove all revenge boss bars (requires permission)");
+            sender.sendMessage("§e/deathrevenge cooldown §7- Check your revenge target cooldown status");
             return true;
         }
         return false;
@@ -321,6 +338,12 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
         List<Player> possibleTargets = new ArrayList<>(Bukkit.getOnlinePlayers());
         possibleTargets.remove(victim);
         possibleTargets.removeIf(p -> revengeTasks.containsKey(p.getUniqueId()));
+        
+        // Remove players who are on cooldown
+        possibleTargets.removeIf(p -> {
+            Long cooldownEnd = targetCooldowns.get(p.getUniqueId());
+            return cooldownEnd != null && cooldownEnd > System.currentTimeMillis();
+        });
         
         if (possibleTargets.isEmpty()) {
             // Play fail sound
@@ -479,18 +502,28 @@ public class DeathRevenge extends JavaPlugin implements Listener, CommandExecuto
                 if (hunter != null) {
                     hunter.sendMessage("§cYour revenge target logged out. Revenge cancelled.");
                     hunter.playSound(hunter.getLocation(), Sound.ENTITY_VILLAGER_NO, SoundCategory.PLAYERS, 1.0f, 1.0f);
+                    spawnWarningParticles(hunter, 20); // Add particles for visual feedback
                 }
                 task.cancel();
                 revengeTasks.remove(entry.getKey());
                 revengeBossBars.remove(entry.getKey());
                 deathLocations.remove(entry.getKey());
                 removeRevengeItems(hunter);
+                
+                // Set cooldown for the target
+                targetCooldowns.put(player.getUniqueId(), System.currentTimeMillis() + (targetCooldown * 1000L));
             }
         }
         
         // If player was in revenge mode, cancel their revenge
         if (revengeTasks.containsKey(player.getUniqueId())) {
             RevengeTask task = revengeTasks.get(player.getUniqueId());
+            Player target = Bukkit.getPlayer(task.getTargetUUID());
+            if (target != null) {
+                target.sendMessage("§aYour revenge seeker has logged out. You're safe... for now.");
+                target.playSound(target.getLocation(), Sound.ENTITY_VILLAGER_YES, SoundCategory.PLAYERS, 1.0f, 1.0f);
+                spawnTeleportParticles(target, 20); // Add particles for visual feedback
+            }
             task.cancel();
             revengeTasks.remove(player.getUniqueId());
             revengeBossBars.remove(player.getUniqueId());
